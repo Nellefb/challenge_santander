@@ -1,6 +1,6 @@
 # Challenge FIAP 2025 - Santander | Solução do Time Data Wave
 
-**Integrantes:** Ellen Ferreira, Gabriel Paterra, Gabriel Valls, Gustavo Rosa, Kaio Valls
+**Integrantes:** Ellen Ferreira, Gabriel Paterra, Gabriel Valls, Gustavo Campos, Kaio Valls
 
 ## 1. Visão Geral do Projeto
 
