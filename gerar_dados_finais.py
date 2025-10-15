@@ -2,7 +2,7 @@
 # PROGRAMA BACK-END V4 (FINAL) - CHALLENGE FIAP SANTANDER
 # Time: Data Wave
 # Finalidade: Gerar dados com ALTA VARIÂNCIA E SAZONALIDADE para um
-#             dashboard com aparência e comportamento realistas.
+#             dashboard com aparência e comportamento realistas.
 # --------------------------------------------------------------------------
 
 import pandas as pd
@@ -48,7 +48,6 @@ def executar_backend_final():
     
     # --- GERAÇÃO DAS TABELAS (código similar, mas usando os pesos) ---
     print(f"-> Gerando dados para {NUM_CLIENTES} clientes (Tabela 1)...")
-    # (O restante do código abaixo é a lógica que aplica todos esses pesos)
     
     lista_clientes = []
     for i in range(NUM_CLIENTES):
@@ -57,7 +56,8 @@ def executar_backend_final():
         data_abertura = fake.date_between(start_date='-10y', end_date='-1y')
         saldo = round(random.uniform(-50000, 500000) * peso_c, 2)
         faturamento = abs(saldo * random.uniform(1.5, 10)) if saldo > 0 else random.uniform(10000, 2000000) * peso_c
-        lista_clientes.append({'ID': i + 1, 'VL_FATU': round(faturamento, 2), 'VL_SLDO': saldo, 'DT_ABRT': data_abertura, 'DS_CNAE': cnae_cliente, 'DT_REFE': date(2023, 12, 31)})
+        # Removido DT_REFE daqui, pois não é usado e pode causar confusão
+        lista_clientes.append({'ID': i + 1, 'VL_FATU': round(faturamento, 2), 'VL_SLDO': saldo, 'DT_ABRT': data_abertura, 'DS_CNAE': cnae_cliente, 'DT_REFE': DATA_FIM})
     tabela1_df = pd.DataFrame(lista_clientes)
     
     print(f"-> Gerando {NUM_TRANSACOES} transações com variância...")
@@ -82,7 +82,6 @@ def executar_backend_final():
         data_transacao = DATA_INICIO + timedelta(days=random.randint(0, total_dias))
         tipo_transacao = tipos_de_transacao_gerados[i]
 
-        # Aplicando todos os pesos para um valor final realista
         peso_c = pesos_cnae.get(cnae_pagador, 1.0)
         multiplicador_v = pesos_tipo_transacao['multiplicador_valor'].get(tipo_transacao, 1.0)
         peso_s = pesos_sazonalidade.get(data_transacao.month, 1.0)
@@ -94,27 +93,60 @@ def executar_backend_final():
         
     tabela2_df = pd.DataFrame(lista_transacoes)
 
-    # --- DATA SCIENCE E SALVAMENTO (sem alterações) ---
-    print("-> Aplicando modelos de classificação...")
-    def classificar_momento(row):
-        anos_empresa = (date.today() - row['DT_ABRT']).days / 365.25
-        if anos_empresa <= 2 and row['VL_FATU'] < 500000: return 'Início'
-        if row['VL_FATU'] > 1500000 and row['VL_SLDO'] < 0: return 'Expansão'
-        if anos_empresa > 5 and row['VL_FATU'] > 1000000 and row['VL_SLDO'] > 100000: return 'Maturidade'
-        if row['VL_SLDO'] < -50000 and row['VL_FATU'] < 400000: return 'Declínio'
-        return 'Maturidade'
-    tabela1_df['Momento_Vida'] = tabela1_df.apply(classificar_momento, axis=1)
-    pagadores_por_cliente = tabela2_df.groupby('ID_RCBE')['ID_PGTO'].nunique().reset_index()
-    pagadores_por_cliente.rename(columns={'ID_PGTO': 'Qtd_Pagadores_Unicos'}, inplace=True)
-    tabela1_df = pd.merge(tabela1_df, pagadores_por_cliente, left_on='ID', right_on='ID_RCBE', how='left').fillna(0)
-    def classificar_dependencia(qtd_pagadores):
-        if qtd_pagadores <= 2: return 'Alta Dependência'
-        elif qtd_pagadores <= 5: return 'Média Dependência'
+    # <<< INÍCIO DA SEÇÃO SUBSTITUÍDA >>>
+    # --- DATA SCIENCE E SALVAMENTO (COM MELHORIAS) ---
+    print("-> Aplicando modelos de classificação aprimorados...")
+
+    # --- MELHORIA 1: Regras de "Momento de Vida" Mais Inteligentes ---
+    hoje = date.today() # Usando a data atual para o cálculo
+    tabela1_df['IDADE_EMPRESA'] = (pd.Timestamp(hoje) - pd.to_datetime(tabela1_df['DT_ABRT'])).dt.days / 365.25
+    
+    def classificar_momento_melhorado(row):
+        anos_empresa = row['IDADE_EMPRESA']
+        faturamento = row['VL_FATU']
+        saldo = row['VL_SLDO']
+        
+        if anos_empresa <= 2 and faturamento < 500000:
+            return 'Início'
+        if anos_empresa <= 5 and faturamento > 1500000 and saldo < 0:
+            return 'Expansão Agressiva'
+        if anos_empresa > 5 and faturamento > 1000000 and saldo > 100000:
+            return 'Maturidade'
+        if saldo < -50000 and faturamento < 400000:
+            return 'Declínio'
+        return 'Crescimento Estável'
+
+    tabela1_df['Momento_Vida'] = tabela1_df.apply(classificar_momento_melhorado, axis=1)
+
+    # --- MELHORIA 3: Métrica de Dependência Aprimorada ---
+    print("-> Calculando métrica de dependência aprimorada...")
+    receita_total_por_cliente = tabela2_df.groupby('ID_RCBE')['VL'].sum().reset_index().rename(columns={'VL': 'VL_TOTAL_RECEBIDO'})
+    
+    # Linha corrigida para encontrar o valor do maior pagador de forma eficiente
+    receita_maior_pagador_valor = tabela2_df.groupby(['ID_RCBE', 'ID_PGTO'])['VL'].sum().groupby('ID_RCBE').max().reset_index().rename(columns={'VL': 'VL_MAIOR_PAGADOR'})
+
+    tabela1_df = pd.merge(tabela1_df, receita_total_por_cliente, left_on='ID', right_on='ID_RCBE', how='left')
+    tabela1_df = pd.merge(tabela1_df, receita_maior_pagador_valor, on='ID_RCBE', how='left')
+    tabela1_df.fillna(0, inplace=True)
+
+    # Evita divisão por zero
+    tabela1_df['CONCENTRACAO_RECEITA'] = 0.0
+    tabela1_df.loc[tabela1_df['VL_TOTAL_RECEBIDO'] > 0, 'CONCENTRACAO_RECEITA'] = \
+        (tabela1_df['VL_MAIOR_PAGADOR'] / tabela1_df['VL_TOTAL_RECEBIDO'])
+
+    def classificar_dependencia_melhorado(concentracao):
+        if concentracao > 0.6: return 'Alta Dependência'
+        elif concentracao > 0.3: return 'Média Dependência'
         else: return 'Baixa Dependência'
-    tabela1_df['Nivel_Dependencia'] = tabela1_df['Qtd_Pagadores_Unicos'].apply(classificar_dependencia)
+
+    tabela1_df['Nivel_Dependencia'] = tabela1_df['CONCENTRACAO_RECEITA'].apply(classificar_dependencia_melhorado)
+
+    # --- SALVAMENTO FINAL ---
     tabela1_df.to_csv('base1_id.csv', index=False, encoding='utf-8-sig')
     tabela2_df.to_csv('base2_transacoes.csv', index=False, encoding='utf-8-sig')
-    print("   ... Arquivos finais com alta variância e insights foram gerados.")
+    print("   ... Arquivos finais com alta variância e insights foram gerados.")
+    # <<< FIM DA SEÇÃO SUBSTITUÍDA >>>
+    
     print("\n--- EXECUÇÃO DO BACK-END FINALIZADA ---")
 
 if __name__ == "__main__":
